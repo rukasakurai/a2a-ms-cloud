@@ -104,6 +104,15 @@ try
 finally
 {
     // Clean up the server-side Prompt agent so repeated runs don't accumulate
-    // agents in the project.
-    adminClient.DeleteAgent(weatherAgentName);
+    // agents in the project. Guard the cleanup so a delete failure cannot mask
+    // an exception thrown from the main flow above.
+    try
+    {
+        adminClient.DeleteAgent(weatherAgentName);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(
+            $"Warning: failed to delete Prompt agent '{weatherAgentName}': {ex.Message}");
+    }
 }
