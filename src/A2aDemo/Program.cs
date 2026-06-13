@@ -7,18 +7,20 @@ using Microsoft.Agents.AI;
 // Microsoft Foundry Agent Service - agent-as-function delegation demo (.NET 10)
 //
 // This sample demonstrates Microsoft Agent Framework agent-as-function
-// delegation with the same call-and-return semantics as the A2A tool, spanning
-// both agent shapes from the announcement:
+// delegation with the same call-and-return semantics as the A2A tool. It pairs a
+// server-side Prompt agent (one of the announcement's two agent shapes) with an
+// in-process coordinator:
 //
 //   * WeatherAgent     - a *Prompt agent*: a server-side agent created in the
 //                        Foundry project via AgentAdministrationClient. It is
 //                        persisted in the project (a name plus versions) and
 //                        answers weather questions.
 //   * CoordinatorAgent - a *Responses Agent*: composed in-process with the
-//                        Microsoft Agent Framework (no server-side resource is
-//                        created). The Prompt agent is attached to it as a tool
-//                        via AsAIFunction(), so the coordinator delegates to it
-//                        and summarizes the reply.
+//                        Microsoft Agent Framework. No server-side resource is
+//                        created, so it is not the announcement's server-side
+//                        Hosted agent shape. The Prompt agent is attached to it
+//                        as a tool via AsAIFunction(), so the coordinator
+//                        delegates to it and summarizes the reply.
 //
 // When the in-process coordinator calls the Prompt specialist, the specialist's
 // answer flows back to the coordinator, which keeps control of the conversation.

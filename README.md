@@ -20,9 +20,10 @@ integrations. The two agent shapes in the announcement are:
 
 - **Prompt agents** — server-side agents created in your Foundry project (an
   agent name plus versions). They speak the responses protocol by default.
-- **Hosted agents** — agents you compose in your own process with the
-  [Microsoft Agent Framework](https://github.com/microsoft/agent-framework),
-  which also talk to the Foundry model through the responses protocol.
+- **Hosted agents** — agents you build (for example with the
+  [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)) and
+  deploy to Foundry, where they run as a managed, server-side resource and speak
+  the responses protocol.
 
 Two related capabilities ship under the A2A umbrella:
 
@@ -41,7 +42,8 @@ entirely to the other agent.)
 
 A **.NET 10** console app (`src/A2aDemo`) that demonstrates **Microsoft Agent
 Framework agent-as-function delegation** with the same call-and-return semantics
-as the A2A tool — across both agent shapes from the announcement:
+as the A2A tool. It pairs a server-side Prompt agent (one of the announcement's
+two agent shapes) with an in-process coordinator:
 
 - `WeatherPromptAgent` — a **Prompt agent**: a server-side, project-hosted
   (declarative) agent created and versioned through the
@@ -49,13 +51,14 @@ as the A2A tool — across both agent shapes from the announcement:
   the Foundry project until deleted and answers weather questions.
 - `CoordinatorAgent` — a **Responses Agent**: composed in-process with the
   [Microsoft Agent Framework](https://github.com/microsoft/agent-framework). No
-  server-side resource is created; model, instructions, and tools are provided at
-  runtime. The Prompt agent is attached as a tool via `weatherAgent.AsAIFunction()`,
-  so the coordinator can call the specialist agent and summarize the reply —
-  the same call-and-return shape the A2A tool models in Foundry Agent Service.
+  server-side resource is created (so it is *not* the announcement's server-side
+  Hosted agent shape); model, instructions, and tools are provided at runtime.
+  The Prompt agent is attached as a tool via `weatherAgent.AsAIFunction()`, so the
+  coordinator can call the specialist agent and summarize the reply — the same
+  call-and-return shape the A2A tool models in Foundry Agent Service.
 
-The single run exercises **agent-as-function delegation across the two shapes**:
-the in-process Responses Agent coordinator delegates to the server-side Prompt
+The single run exercises **agent-as-function delegation**: the in-process
+Responses Agent coordinator delegates to the server-side Prompt
 specialist and stays in control of the user dialogue. This demonstrates the same
 call-and-return semantics as the remote A2A tool using **in-process function-tool
 composition** — it does not implement protocol-level A2A (no A2A connection,
