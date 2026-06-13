@@ -25,9 +25,13 @@ jobs:
       - name: Restore
         run: dotnet restore src/A2aDemo/A2aDemo.csproj
 
+      - name: Install dotnet-format
+        run: |
+          dotnet tool install -g dotnet-format
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+
       - name: Verify formatting
         run: dotnet format src/A2aDemo/A2aDemo.csproj --verify-no-changes --no-restore
-
       - name: Build
         run: dotnet build src/A2aDemo/A2aDemo.csproj --configuration Release --no-restore
 
