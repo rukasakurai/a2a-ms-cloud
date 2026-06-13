@@ -1,13 +1,44 @@
 # a2a-ms-cloud
 
 A small, deployable implementation that makes the Microsoft Foundry Agent
-Service **agent-to-agent (A2A)** public-preview announcement concrete, so the
-feature can be understood by running it rather than only reading about it.
+Service **agent-to-agent (A2A)** public-preview announcement concrete on Azure,
+so the open standard can be understood by running it rather than only reading
+about it. The sample publishes a server-side Foundry agent behind a genuine
+**A2A protocol v1.0** endpoint and has a second agent call it **over the wire**.
 
 > Microsoft Foundry Agent Service adds agent-to-agent (A2A) communication in
 > public preview for Prompt agents and Hosted agents that use the responses
 > protocol.
 > — [Azure Updates](https://azure.microsoft.com/en-us/updates?id=563716)
+
+## A2A protocol version
+
+A2A has had breaking changes across versions, so this repo is **explicit about
+the version it targets** rather than saying "A2A" ambiguously.
+
+- **Target: A2A protocol `v1.0`** — the open standard
+  [a2aproject/A2A v1.0.0](https://github.com/a2aproject/A2A/releases) (released
+  2026-03-12), advertised as `protocolVersion: "1.0"` in the agent card.
+- The version is pinned in code in
+  [`src/A2aDemo/A2aProtocol.cs`](src/A2aDemo/A2aProtocol.cs) and surfaced in the
+  console output and the published agent card.
+
+This aligns with the libraries and platform:
+
+| Component | Version | A2A protocol |
+| --- | --- | --- |
+| `A2A` / `A2A.AspNetCore` (open A2A .NET SDK) | `1.0.0-preview2` | v1.0 |
+| `Microsoft.Agents.AI.A2A` (Foundry ⇄ A2A bridge) | `1.5.0-preview.260507.1` | v1.0 (depends on `A2A 1.0.0-preview2`) |
+| Microsoft Foundry Agent Service | public preview | v1.0 **and** v0.3 |
+
+> **Calling a Foundry-native A2A endpoint?** Foundry serves both v1.0 and v0.3 on
+> the same path and **defaults to v0.3** unless the client negotiates v1.0 — via
+> the `A2A-Version: 1.0` header, `?a2a-version=1.0`, or by fetching the v1.0 agent
+> card so the client SDK negotiates automatically. New integrations should target
+> v1.0. See
+> [Enable incoming A2A on a Foundry agent](https://learn.microsoft.com/azure/foundry/agents/how-to/enable-agent-to-agent-endpoint#a2a-protocol-versions).
+> This sample hosts its own v1.0 endpoint with the A2A .NET SDK, so the whole run
+> is v1.0 end to end.
 
 ## What the announcement means
 
@@ -17,10 +48,12 @@ request/response (the **responses protocol**) instead of bespoke, point-to-point
 integrations. The two agent shapes in the announcement are:
 
 - **Prompt agents** — server-side agents created in your Foundry project (an
-  agent name plus versions). They speak the responses protocol by default.
-- **Hosted agents** — agents you compose in your own process with the
-  [Microsoft Agent Framework](https://github.com/microsoft/agent-framework),
-  which also talk to the Foundry model through the responses protocol.
+  agent name plus versions). They speak the responses protocol by default and can
+  be exposed as A2A endpoints.
+- **Hosted agents** — agents you build (for example with the
+  [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)) and
+  deploy to Foundry, where they run as a managed, server-side resource and can be
+  exposed over A2A if they implement the responses protocol.
 
 Two related capabilities ship under the A2A umbrella:
 
@@ -37,30 +70,33 @@ entirely to the other agent.)
 
 ## What this repo implements
 
-A **.NET 10** console app (`src/A2aDemo`) that demonstrates the A2A
-call-and-return pattern across **both** agent shapes from the announcement —
-a Prompt agent and a Hosted agent — using the responses protocol:
+A **.NET 10** console app (`src/A2aDemo`) that demonstrates **protocol-level A2A**
+(not just similar in-process semantics):
 
 - `WeatherPromptAgent` — a **Prompt agent**: a server-side, project-hosted
   (declarative) agent created and versioned through the
-  `AgentAdministrationClient` (`DeclarativeAgentDefinition`). It is persisted in
-  the Foundry project until deleted and answers weather questions.
-- `CoordinatorAgent` — a **Hosted agent**: composed in-process with the
-  [Microsoft Agent Framework](https://github.com/microsoft/agent-framework). The
-  Prompt agent is attached to it as a tool via `weatherAgent.AsAIFunction()`, so
-  the coordinator can call the specialist agent and summarize the reply —
-  exactly the call-and-return shape the A2A tool models in Foundry Agent Service.
+  `AgentAdministrationClient` (`DeclarativeAgentDefinition`). It answers weather
+  questions and is **published behind a genuine A2A endpoint** using the open A2A
+  .NET SDK: an agent card is served at `/.well-known/agent-card.json` (discovery)
+  and a JSON-RPC endpoint at `/weather`. The
+  [`WeatherAgentHandler`](src/A2aDemo/WeatherAgentHandler.cs) implements A2A's
+  `IAgentHandler` and runs the Foundry agent for each inbound A2A message.
+- `CoordinatorAgent` — an in-process Agent Framework agent that **delegates to the
+  specialist by calling its A2A endpoint**. The agent card is resolved into an
+  `AIAgent` with the A2A bridge (`A2ACardResolver.GetAIAgentAsync`), so the
+  coordinator's tool call travels over HTTP + JSON-RPC — real A2A, not in-process
+  composition.
 
-The single run exercises **agent-to-agent across the two shapes**: the in-process
-Hosted coordinator delegates to the server-side Prompt specialist and stays in
-control of the user dialogue. This demonstrates the same call-and-return
-semantics as the remote A2A tool without requiring a separate deployed endpoint
-and a portal-created A2A connection (the remote path is summarized under
-[Calling a remote A2A endpoint](#calling-a-remote-a2a-endpoint) below). The app
-deletes the Prompt agent it creates on exit so repeated runs stay clean.
+A single run proves protocol-level A2A: **agent-card discovery** followed by a
+**JSON-RPC call between agents**. For comparison, the same run also performs the
+**in-process** path (`weatherAgent.AsAIFunction()`) and labels it clearly as
+**NOT A2A** — it only mimics the call-and-return semantics locally, with no agent
+card, A2A connection, or endpoint. (That in-process path is what earlier versions
+of this sample did and previously mislabeled as "A2A".)
 
 The Microsoft Foundry resources are provisioned with **Bicep** and **Azure
-Developer CLI (azd)**.
+Developer CLI (azd)**. The A2A endpoint is self-hosted by the app on localhost,
+so no portal-created A2A connection is required to run the demo.
 
 ## Repository layout
 
@@ -72,9 +108,25 @@ Developer CLI (azd)**.
 │   ├── resources.bicep         # Foundry account, project, model deployment, RBAC
 │   └── main.parameters.json    # azd -> Bicep parameter mapping
 └── src/
-    └── A2aDemo/                # .NET 10 console app demonstrating A2A
+    └── A2aDemo/                # .NET 10 console app demonstrating A2A protocol v1.0
         ├── A2aDemo.csproj
-        └── Program.cs
+        ├── A2aProtocol.cs      # pinned A2A protocol version + alignment notes
+        ├── WeatherAgentHandler.cs  # A2A server: IAgentHandler + agent card
+        └── Program.cs          # orchestration: host A2A endpoint, call over the wire
+```
+
+## How the demo flows
+
+```
+                 (1) create + bind                 (2) publish over A2A
+  Foundry project ───────────────► WeatherPromptAgent ───────────────► A2A endpoint
+  (Prompt agent)                     (AIAgent)                          /.well-known/agent-card.json
+                                                                        /weather (JSON-RPC)
+                                                                              ▲
+                                                  (3) discover card +         │ HTTP + JSON-RPC
+                                                      call OVER A2A           │ (A2A protocol v1.0)
+  user question ──► CoordinatorAgent ──► weatherOverA2A.AsAIFunction() ───────┘
+                       (in-process)         (A2A-backed proxy)
 ```
 
 ## Infrastructure
@@ -118,14 +170,26 @@ dotnet run --project src/A2aDemo
 dotnet run --project src/A2aDemo -- "Will I need an umbrella in Seattle?"
 ```
 
+By default the app self-hosts the A2A endpoint on `http://127.0.0.1:5247`.
+Override the port with `A2A_LOCAL_PORT` if needed.
+
 Expected output (text varies with the model):
 
 ```
 Prompt agent     : WeatherPromptAgent (version 1)
 ...
-CoordinatorAgent (Hosted) is delegating to WeatherPromptAgent (Prompt) via A2A...
+WeatherPromptAgent is published over A2A (protocol v1.0) at http://127.0.0.1:5247
+  agent card : http://127.0.0.1:5247/.well-known/agent-card.json
+  JSON-RPC   : http://127.0.0.1:5247/weather
 
-CoordinatorAgent: It's currently cloudy in Amsterdam with a high near 15°C.
+Discovered A2A agent card: WeatherPromptAgent (protocol v1.0, skills: weather_report)
+CoordinatorAgent is delegating to WeatherPromptAgent over the A2A protocol (HTTP + JSON-RPC)...
+
+CoordinatorAgent (via A2A): It's currently cloudy in Amsterdam with a high near 15°C.
+
+For comparison (NOT A2A): the same coordinator delegating via in-process function composition...
+
+CoordinatorAgent (in-process, not A2A): It's currently cloudy in Amsterdam with a high near 15°C.
 ```
 
 The app authenticates with `DefaultAzureCredential`, so the identity from
@@ -137,17 +201,22 @@ To remove all provisioned resources:
 azd down
 ```
 
-## Calling a remote A2A endpoint
+## Calling a Foundry-native A2A endpoint
 
-To use the **remote** A2A tool instead of in-process composition, create an A2A
-connection in your Foundry project (Tools → Connect tool → Custom →
-Agent2Agent) and attach an `A2APreviewTool` that references the connection ID
-when you create the agent version. See
-[Connect to an A2A agent endpoint from Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/agent-to-agent).
+This sample hosts its own A2A endpoint with the A2A .NET SDK. To instead call a
+**Foundry-hosted** A2A endpoint (or expose a Foundry agent as one), enable
+incoming A2A on the agent and/or create an A2A connection in your project, then
+attach the A2A tool. Remember the **version negotiation** note above: target
+`A2A-Version: 1.0` (or fetch the v1.0 agent card) so you get v1.0 rather than the
+v0.3 default. See
+[Connect to an A2A agent endpoint](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/agent-to-agent)
+and
+[Enable incoming A2A on a Foundry agent](https://learn.microsoft.com/azure/foundry/agents/how-to/enable-agent-to-agent-endpoint).
 
 ## References
 
+- [A2A protocol](https://a2a-protocol.org/latest/) · [a2aproject/A2A releases](https://github.com/a2aproject/A2A/releases)
+- [A2A .NET SDK (a2aproject/a2a-dotnet)](https://github.com/a2aproject/a2a-dotnet)
 - [Connect to an A2A agent endpoint from Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/agent-to-agent)
 - [Enable incoming A2A on a Foundry agent](https://learn.microsoft.com/azure/foundry/agents/how-to/enable-agent-to-agent-endpoint)
-- [A2A protocol](https://a2a-protocol.org/latest/)
 - [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)
