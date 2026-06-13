@@ -4,7 +4,7 @@ using Azure.Identity;
 using Microsoft.Agents.AI;
 
 // =============================================================================
-// Microsoft Foundry Agent Service - agent-as-function delegation demo (.NET 10)
+// Microsoft Foundry Agent Service - agent-to-agent (A2A) demo (.NET 10)
 //
 // This sample demonstrates Microsoft Agent Framework agent-as-function
 // delegation with the same call-and-return semantics as the A2A tool. It pairs a
