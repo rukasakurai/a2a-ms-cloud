@@ -1,17 +1,27 @@
 # a2a-ms-cloud
 
-A small, deployable implementation that makes the Microsoft Foundry Agent
-Service **agent-to-agent (A2A)** public-preview announcement concrete on Azure,
-so the open standard can be understood by running it rather than only reading
-about it. The sample publishes both Foundry **agent shapes from the announcement**
-— a **Prompt agent** and a **Hosted agent** — behind genuine **A2A protocol v1.0**
-endpoints, and has agents call each other **over the wire**. The Hosted agent acts
-as **both an A2A server and an A2A client** in a single two-hop call.
+**Intent.** Demonstrate agent-to-agent (A2A) on the **Microsoft Cloud**
+(including Azure) by making the Microsoft Foundry Agent Service A2A
+public-preview announcement concrete — so the capability can be understood by
+running it rather than only reading about it. Concretely, that means both
+Foundry **agent shapes from the announcement** — a **Prompt agent** and a
+**Hosted agent** — reachable over **A2A protocol v1.0** with the **cloud**
+serving the endpoint (agent card + responses protocol), and agents calling each
+other **over the wire**.
 
 > Microsoft Foundry Agent Service adds agent-to-agent (A2A) communication in
 > public preview for Prompt agents and Hosted agents that use the responses
 > protocol.
 > — [Azure Updates](https://azure.microsoft.com/en-us/updates?id=563716)
+
+> [!WARNING]
+> **Work in progress — does not yet satisfy the intent.** Today the A2A
+> endpoints are **self-hosted by the local console app on `localhost`**, bridging
+> to Foundry-hosted agents; the **cloud does not serve the A2A endpoint**. So the
+> sample exercises A2A *semantics* against cloud-hosted agents, but not the
+> Foundry-native cloud-served A2A endpoint the announcement introduces. Tracking:
+> [#9](https://github.com/rukasakurai/a2a-ms-cloud/issues/9). The sections below
+> describe the **current** localhost-based implementation.
 
 ## A2A protocol version
 
