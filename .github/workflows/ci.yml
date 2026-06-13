@@ -27,7 +27,7 @@ jobs:
 
       - name: Install dotnet-format
         run: |
-          dotnet tool install -g dotnet-format
+          dotnet tool install -g dotnet-format --version 5.1.250801
           echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
       - name: Verify formatting
