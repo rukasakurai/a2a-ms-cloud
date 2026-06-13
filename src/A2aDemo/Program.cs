@@ -88,8 +88,7 @@ try
     // -----------------------------------------------------------------------
     AIAgent coordinatorAgent = projectClient.AsAIAgent(
         deploymentName,
-        instructions: "You are a helpful coordinator. When asked about the weather, "
-            + "call the WeatherPromptAgent tool and summarize its answer for the user.",
+        instructions: $"You are a helpful coordinator. When asked about the weather, call the {weatherAgentName} tool and summarize its answer for the user.",
         name: "CoordinatorAgent",
         tools: [weatherAgent.AsAIFunction()]);
 
