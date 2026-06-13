@@ -39,9 +39,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Bicep CLI
-        run: az bicep install
+        run: |
+          curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x ./bicep
+          sudo mv ./bicep /usr/local/bin/bicep
+          bicep --version
 
       - name: Build Bicep (lint)
         run: |
-          az bicep build --file infra/main.bicep --stdout > /dev/null
-          az bicep build --file infra/resources.bicep --stdout > /dev/null
+          bicep build infra/main.bicep --stdout > /dev/null
+          bicep build infra/resources.bicep --stdout > /dev/null
