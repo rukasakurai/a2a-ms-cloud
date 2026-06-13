@@ -8,10 +8,23 @@
     <RootNamespace>A2aDemo</RootNamespace>
   </PropertyGroup>
 
+  <!-- The demo self-hosts an A2A endpoint with ASP.NET Core (Kestrel) while
+       staying a console executable. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Microsoft Agent Framework Foundry provider. Transitively pulls in
          Azure.AI.Projects, Azure.Identity and Microsoft.Extensions.AI. -->
     <PackageReference Include="Microsoft.Agents.AI.Foundry" Version="1.5.0" />
+    <!-- Agent Framework <-> A2A bridge: turns a remote A2A agent card into an
+         AIAgent. Aligned with Abstractions 1.5.0 used by the Foundry provider. -->
+    <PackageReference Include="Microsoft.Agents.AI.A2A" Version="1.5.0-preview.260507.1" />
+    <!-- Open A2A protocol implementation (client + server) and its ASP.NET Core
+         hosting integration (MapA2A, agent-card discovery). -->
+    <PackageReference Include="A2A" Version="1.0.0-preview2" />
+    <PackageReference Include="A2A.AspNetCore" Version="1.0.0-preview2" />
   </ItemGroup>
 
 </Project>

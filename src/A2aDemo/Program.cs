@@ -1,28 +1,40 @@
+using A2A;
+using A2A.AspNetCore;
+using A2aDemo;
 using Azure.AI.Projects;
 using Azure.AI.Projects.Agents;
 using Azure.Identity;
 using Microsoft.Agents.AI;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 // =============================================================================
 // Microsoft Foundry Agent Service - agent-to-agent (A2A) demo (.NET 10)
 //
-// The A2A public-preview announcement covers two agent shapes that speak the
-// responses protocol: Prompt agents and Hosted agents. This sample makes BOTH
-// concrete and shows A2A call-and-return spanning the two:
+// This sample demonstrates the *open* A2A standard end to end on Azure Foundry.
+// It targets **A2A protocol v1.0** (see A2aProtocol.cs for version/alignment notes).
+// A server-side Foundry Prompt agent is published behind a genuine A2A endpoint
+// (agent card + HTTP/JSON-RPC), and a coordinator then calls it OVER THE A2A
+// PROTOCOL rather than through in-process composition.
 //
-//   * WeatherAgent     - a *Prompt agent*: a server-side agent created in the
-//                        Foundry project via AgentAdministrationClient. It is
-//                        persisted in the project (a name plus versions) and
-//                        answers weather questions.
-//   * CoordinatorAgent - a *Hosted agent*: composed in-process with the
-//                        Microsoft Agent Framework. The Prompt agent is attached
-//                        to it as a tool, so the coordinator delegates to it and
-//                        summarizes the reply.
+//   * WeatherPromptAgent - a *Prompt agent*: a server-side agent created in the
+//                          Foundry project via AgentAdministrationClient. It is
+//                          published behind an A2A endpoint (agent card served at
+//                          /.well-known, JSON-RPC at /weather) using the A2A.NET
+//                          SDK, so other A2A clients can discover and call it.
+//   * CoordinatorAgent   - an in-process Agent Framework agent that delegates to
+//                          the specialist by calling its *A2A endpoint*. The A2A
+//                          card is resolved into an AIAgent with the A2A bridge
+//                          (resolver.GetAIAgentAsync), so the coordinator's tool
+//                          call travels over the A2A wire.
 //
-// When the Hosted coordinator calls the Prompt specialist, the specialist's
-// answer flows back to the coordinator, which keeps control of the conversation.
-// That call-and-return behavior is exactly what the A2A tool models in Foundry
-// Agent Service. See README.md for the mapping to the announcement.
+// The single run proves protocol-level A2A: agent-card discovery + a JSON-RPC
+// call between agents. For comparison, the run also shows the *in-process*
+// function-composition path (weatherAgent.AsAIFunction()) and labels it clearly
+// as NOT A2A - it only mimics the call-and-return semantics locally.
+// See README.md for the mapping to the announcement and the open standard.
 // =============================================================================
 
 string endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT")
@@ -37,6 +49,13 @@ string deploymentName = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLO
 string question = args.Length > 0
     ? string.Join(' ', args)
     : "What is the weather like in Amsterdam?";
+
+// Local address for the self-hosted A2A endpoint (override with A2A_LOCAL_PORT).
+int localPort = int.TryParse(Environment.GetEnvironmentVariable("A2A_LOCAL_PORT"), out int p)
+    ? p
+    : 5247;
+string a2aBaseUrl = $"http://127.0.0.1:{localPort}";
+const string a2aAgentPath = "/weather";
 
 // DefaultAzureCredential uses the identity from 'azd auth login' / 'az login'.
 var credential = new DefaultAzureCredential();
@@ -75,33 +94,94 @@ Console.WriteLine($"Prompt agent     : {weatherVersion.Name} (version {weatherVe
 Console.WriteLine($"User question    : {question}");
 Console.WriteLine();
 
+WebApplication? a2aHost = null;
 try
 {
-    // Bind the server-side Prompt agent as an in-process AIAgent so it can be
-    // invoked directly and reused as a tool.
+    // Bind the server-side Prompt agent as an in-process AIAgent so it can power
+    // the A2A endpoint and be reused for the in-process comparison below.
     AIAgent weatherAgent = projectClient.AsAIAgent(weatherVersion);
 
     // -----------------------------------------------------------------------
-    // 2. Hosted agent (in-process): compose the CoordinatorAgent with the
-    //    Microsoft Agent Framework. The Prompt agent is attached as a tool via
-    //    AsAIFunction(), so the coordinator can call it (agent-to-agent).
+    // 2. Publish the Prompt agent behind a genuine A2A endpoint. The A2A.NET
+    //    SDK hosts an agent card (discovery) plus a JSON-RPC endpoint; the
+    //    handler runs the Foundry agent for each incoming A2A message.
     // -----------------------------------------------------------------------
-    AIAgent coordinatorAgent = projectClient.AsAIAgent(
+    AgentCard weatherCard = WeatherAgentHandler.BuildAgentCard($"{a2aBaseUrl}{a2aAgentPath}");
+
+    WebApplicationBuilder webBuilder = WebApplication.CreateBuilder();
+    webBuilder.Logging.ClearProviders(); // keep the demo console output clean
+    webBuilder.Services.AddSingleton<AIAgent>(weatherAgent);
+    webBuilder.Services.AddA2AAgent<WeatherAgentHandler>(weatherCard);
+
+    a2aHost = webBuilder.Build();
+    a2aHost.Urls.Add(a2aBaseUrl);
+    a2aHost.MapA2A(a2aAgentPath);
+    a2aHost.MapWellKnownAgentCard(weatherCard);
+    await a2aHost.StartAsync();
+
+    Console.WriteLine($"WeatherPromptAgent is published over A2A (protocol v{A2aProtocol.Version}) at {a2aBaseUrl}");
+    Console.WriteLine($"  agent card : {a2aBaseUrl}/.well-known/agent-card.json");
+    Console.WriteLine($"  JSON-RPC   : {a2aBaseUrl}{a2aAgentPath}");
+    Console.WriteLine();
+
+    // -----------------------------------------------------------------------
+    // 3. A2A path: discover the agent card and call the specialist over the
+    //    wire. resolver.GetAIAgentAsync turns the remote A2A agent into an
+    //    AIAgent whose invocations travel over HTTP/JSON-RPC, so attaching it
+    //    as a tool makes the coordinator delegate via the A2A protocol.
+    // -----------------------------------------------------------------------
+    using var httpClient = new HttpClient();
+    var resolver = new A2ACardResolver(new Uri(a2aBaseUrl), httpClient);
+
+    AgentCard discoveredCard = await resolver.GetAgentCardAsync();
+    Console.WriteLine(
+        $"Discovered A2A agent card: {discoveredCard.Name} "
+        + $"(protocol v{discoveredCard.SupportedInterfaces[0].ProtocolVersion}, "
+        + $"skills: {string.Join(", ", discoveredCard.Skills.Select(s => s.Id))})");
+
+    AIAgent weatherOverA2A = await resolver.GetAIAgentAsync(httpClient);
+
+    AIAgent coordinatorViaA2A = projectClient.AsAIAgent(
+        deploymentName,
+        instructions: $"You are a helpful coordinator. When asked about the weather, call the {weatherAgentName} tool and summarize its answer for the user.",
+        name: "CoordinatorAgent",
+        tools: [weatherOverA2A.AsAIFunction()]);
+
+    Console.WriteLine("CoordinatorAgent is delegating to WeatherPromptAgent over the A2A protocol (HTTP + JSON-RPC)...");
+    AgentSession a2aSession = await coordinatorViaA2A.CreateSessionAsync();
+    AgentResponse a2aResponse = await coordinatorViaA2A.RunAsync(question, a2aSession);
+    Console.WriteLine();
+    Console.WriteLine($"CoordinatorAgent (via A2A): {a2aResponse.Text}");
+    Console.WriteLine();
+
+    // -----------------------------------------------------------------------
+    // 4. Comparison only - NOT A2A. The same call-and-return semantics can be
+    //    achieved in-process by attaching the Foundry agent directly as a
+    //    function tool (weatherAgent.AsAIFunction()). No agent card, no A2A
+    //    connection, and no endpoint is involved here; the call never leaves
+    //    the process. This is what the previous version of the sample did.
+    // -----------------------------------------------------------------------
+    AIAgent coordinatorInProcess = projectClient.AsAIAgent(
         deploymentName,
         instructions: $"You are a helpful coordinator. When asked about the weather, call the {weatherAgentName} tool and summarize its answer for the user.",
         name: "CoordinatorAgent",
         tools: [weatherAgent.AsAIFunction()]);
 
-    Console.WriteLine("CoordinatorAgent (Hosted) is delegating to WeatherPromptAgent (Prompt) via A2A...");
+    Console.WriteLine("For comparison (NOT A2A): the same coordinator delegating via in-process function composition...");
+    AgentSession inProcessSession = await coordinatorInProcess.CreateSessionAsync();
+    AgentResponse inProcessResponse = await coordinatorInProcess.RunAsync(question, inProcessSession);
     Console.WriteLine();
-
-    AgentSession session = await coordinatorAgent.CreateSessionAsync();
-    AgentResponse response = await coordinatorAgent.RunAsync(question, session);
-
-    Console.WriteLine($"CoordinatorAgent: {response}");
+    Console.WriteLine($"CoordinatorAgent (in-process, not A2A): {inProcessResponse.Text}");
 }
 finally
 {
+    // Stop the self-hosted A2A endpoint.
+    if (a2aHost is not null)
+    {
+        await a2aHost.StopAsync();
+        await a2aHost.DisposeAsync();
+    }
+
     // Clean up the server-side Prompt agent so repeated runs don't accumulate
     // agents in the project. Guard the cleanup so a delete failure cannot mask
     // an exception thrown from the main flow above.
