@@ -38,20 +38,26 @@ entirely to the other agent.)
 ## What this repo implements
 
 A **.NET 10** console app (`src/A2aDemo`) that demonstrates the A2A
-call-and-return pattern with Hosted agents using the Microsoft Agent Framework
-and the responses protocol:
+call-and-return pattern across **both** agent shapes from the announcement —
+a Prompt agent and a Hosted agent — using the responses protocol:
 
-- `WeatherAgent` — a specialist agent with a local `GetWeather` function tool.
-- `CoordinatorAgent` — the agent the user talks to. The specialist is attached
-  to it as a tool via `weatherAgent.AsAIFunction()`, so the coordinator can call
-  the specialist agent and summarize the reply — exactly the call-and-return
-  shape the A2A tool models in Foundry Agent Service.
+- `WeatherPromptAgent` — a **Prompt agent**: a server-side, project-hosted
+  (declarative) agent created and versioned through the
+  `AgentAdministrationClient` (`DeclarativeAgentDefinition`). It is persisted in
+  the Foundry project until deleted and answers weather questions.
+- `CoordinatorAgent` — a **Hosted agent**: composed in-process with the
+  [Microsoft Agent Framework](https://github.com/microsoft/agent-framework). The
+  Prompt agent is attached to it as a tool via `weatherAgent.AsAIFunction()`, so
+  the coordinator can call the specialist agent and summarize the reply —
+  exactly the call-and-return shape the A2A tool models in Foundry Agent Service.
 
-This in-process composition is the C# **Hosted Agents** approach shown in the
-official A2A how-to. It demonstrates the same call-and-return semantics as the
-remote A2A tool without requiring a second deployed endpoint and a portal-created
-A2A connection (the remote path is summarized under
-[Calling a remote A2A endpoint](#calling-a-remote-a2a-endpoint) below).
+The single run exercises **agent-to-agent across the two shapes**: the in-process
+Hosted coordinator delegates to the server-side Prompt specialist and stays in
+control of the user dialogue. This demonstrates the same call-and-return
+semantics as the remote A2A tool without requiring a separate deployed endpoint
+and a portal-created A2A connection (the remote path is summarized under
+[Calling a remote A2A endpoint](#calling-a-remote-a2a-endpoint) below). The app
+deletes the Prompt agent it creates on exit so repeated runs stay clean.
 
 The Microsoft Foundry resources are provisioned with **Bicep** and **Azure
 Developer CLI (azd)**.
@@ -115,9 +121,11 @@ dotnet run --project src/A2aDemo -- "Will I need an umbrella in Seattle?"
 Expected output (text varies with the model):
 
 ```
-CoordinatorAgent is delegating to WeatherAgent via A2A...
+Prompt agent     : WeatherPromptAgent (version 1)
+...
+CoordinatorAgent (Hosted) is delegating to WeatherPromptAgent (Prompt) via A2A...
 
-CoordinatorAgent: The weather in Amsterdam is cloudy with a high of 15°C.
+CoordinatorAgent: It's currently cloudy in Amsterdam with a high near 15°C.
 ```
 
 The app authenticates with `DefaultAzureCredential`, so the identity from

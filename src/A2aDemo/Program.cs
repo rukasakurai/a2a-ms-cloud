@@ -1,31 +1,29 @@
-using System.ComponentModel;
 using Azure.AI.Projects;
+using Azure.AI.Projects.Agents;
 using Azure.Identity;
 using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
 
 // =============================================================================
 // Microsoft Foundry Agent Service - agent-to-agent (A2A) demo (.NET 10)
 //
-// This sample makes the A2A public-preview announcement concrete. It composes
-// two Foundry "Hosted agents" that use the responses protocol and lets one
-// delegate to the other:
+// The A2A public-preview announcement covers two agent shapes that speak the
+// responses protocol: Prompt agents and Hosted agents. This sample makes BOTH
+// concrete and shows A2A call-and-return spanning the two:
 //
-//   * WeatherAgent  - a specialist agent that answers weather questions. It
-//                     owns a local function tool (GetWeather).
-//   * CoordinatorAgent - the top-level agent the user talks to. It is given the
-//                     specialist as a tool via WeatherAgent.AsAIFunction(), so
-//                     it can call the specialist agent and summarize the reply.
+//   * WeatherAgent     - a *Prompt agent*: a server-side agent created in the
+//                        Foundry project via AgentAdministrationClient. It is
+//                        persisted in the project (a name plus versions) and
+//                        answers weather questions.
+//   * CoordinatorAgent - a *Hosted agent*: composed in-process with the
+//                        Microsoft Agent Framework. The Prompt agent is attached
+//                        to it as a tool, so the coordinator delegates to it and
+//                        summarizes the reply.
 //
-// When the coordinator calls the specialist, the specialist's answer flows back
-// to the coordinator, which keeps control of the conversation. That call-and-
-// return behavior is exactly what the A2A tool models in Foundry Agent Service.
-// See README.md for the mapping to the announcement and the remote A2A pattern.
+// When the Hosted coordinator calls the Prompt specialist, the specialist's
+// answer flows back to the coordinator, which keeps control of the conversation.
+// That call-and-return behavior is exactly what the A2A tool models in Foundry
+// Agent Service. See README.md for the mapping to the announcement.
 // =============================================================================
-
-[Description("Get the current weather for a given location.")]
-static string GetWeather([Description("The location to get the weather for.")] string location)
-    => $"The weather in {location} is cloudy with a high of 15\u00b0C.";
 
 string endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT")
     ?? throw new InvalidOperationException(
@@ -41,32 +39,71 @@ string question = args.Length > 0
     : "What is the weather like in Amsterdam?";
 
 // DefaultAzureCredential uses the identity from 'azd auth login' / 'az login'.
-AIProjectClient projectClient = new(new Uri(endpoint), new DefaultAzureCredential());
+var credential = new DefaultAzureCredential();
+var projectUri = new Uri(endpoint);
+AIProjectClient projectClient = new(projectUri, credential);
 
-// Specialist agent: owns the GetWeather function tool.
-AITool weatherTool = AIFunctionFactory.Create(GetWeather);
-AIAgent weatherAgent = projectClient.AsAIAgent(
-    deploymentName,
-    instructions: "You are a meteorologist. Answer weather questions using the GetWeather tool.",
-    name: "WeatherAgent",
-    tools: [weatherTool]);
+// ---------------------------------------------------------------------------
+// 1. Prompt agent (server-side): create a persistent WeatherAgent in the
+//    Foundry project. A "Prompt agent" is the project-hosted (declarative)
+//    agent shape from the announcement; it is created and versioned through the
+//    AgentAdministrationClient and lives in the project until deleted.
+// ---------------------------------------------------------------------------
+const string weatherAgentName = "WeatherPromptAgent";
 
-// Coordinator agent: calls the specialist agent as a tool (agent-to-agent).
-AIAgent coordinatorAgent = projectClient.AsAIAgent(
-    deploymentName,
-    instructions: "You are a helpful coordinator. When asked about the weather, "
-        + "call the WeatherAgent tool and summarize its answer for the user.",
-    name: "CoordinatorAgent",
-    tools: [weatherAgent.AsAIFunction()]);
+AgentAdministrationClient adminClient = projectClient.GetProjectAgentsClient(projectUri);
+
+var weatherDefinition = new DeclarativeAgentDefinition(deploymentName)
+{
+    Instructions = "You are a meteorologist. Give a brief, friendly weather report for "
+        + "the requested location. If you do not have live data, provide a plausible "
+        + "seasonal estimate and say so.",
+};
+
+ProjectsAgentVersion weatherVersion = adminClient
+    .CreateAgentVersion(
+        weatherAgentName,
+        new ProjectsAgentVersionCreationOptions(weatherDefinition)
+        {
+            Description = "Specialist Prompt agent that answers weather questions.",
+        })
+    .Value;
 
 Console.WriteLine($"Project endpoint : {endpoint}");
 Console.WriteLine($"Model deployment : {deploymentName}");
+Console.WriteLine($"Prompt agent     : {weatherVersion.Name} (version {weatherVersion.Version})");
 Console.WriteLine($"User question    : {question}");
 Console.WriteLine();
-Console.WriteLine("CoordinatorAgent is delegating to WeatherAgent via A2A...");
-Console.WriteLine();
 
-AgentSession session = await coordinatorAgent.CreateSessionAsync();
-AgentResponse response = await coordinatorAgent.RunAsync(question, session);
+try
+{
+    // Bind the server-side Prompt agent as an in-process AIAgent so it can be
+    // invoked directly and reused as a tool.
+    AIAgent weatherAgent = projectClient.AsAIAgent(weatherVersion);
 
-Console.WriteLine($"CoordinatorAgent: {response}");
+    // -----------------------------------------------------------------------
+    // 2. Hosted agent (in-process): compose the CoordinatorAgent with the
+    //    Microsoft Agent Framework. The Prompt agent is attached as a tool via
+    //    AsAIFunction(), so the coordinator can call it (agent-to-agent).
+    // -----------------------------------------------------------------------
+    AIAgent coordinatorAgent = projectClient.AsAIAgent(
+        deploymentName,
+        instructions: "You are a helpful coordinator. When asked about the weather, "
+            + "call the WeatherPromptAgent tool and summarize its answer for the user.",
+        name: "CoordinatorAgent",
+        tools: [weatherAgent.AsAIFunction()]);
+
+    Console.WriteLine("CoordinatorAgent (Hosted) is delegating to WeatherPromptAgent (Prompt) via A2A...");
+    Console.WriteLine();
+
+    AgentSession session = await coordinatorAgent.CreateSessionAsync();
+    AgentResponse response = await coordinatorAgent.RunAsync(question, session);
+
+    Console.WriteLine($"CoordinatorAgent: {response}");
+}
+finally
+{
+    // Clean up the server-side Prompt agent so repeated runs don't accumulate
+    // agents in the project.
+    adminClient.DeleteAgent(weatherAgentName);
+}
