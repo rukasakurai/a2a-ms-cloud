@@ -5,6 +5,7 @@ using Azure.AI.Projects;
 using Azure.AI.Projects.Agents;
 using Azure.Identity;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -19,21 +20,32 @@ using Microsoft.Extensions.Logging;
 // (agent card + HTTP/JSON-RPC), and a coordinator then calls it OVER THE A2A
 // PROTOCOL rather than through in-process composition.
 //
-//   * WeatherPromptAgent - a *Prompt agent*: a server-side agent created in the
-//                          Foundry project via AgentAdministrationClient. It is
-//                          published behind an A2A endpoint (agent card served at
-//                          /.well-known, JSON-RPC at /weather) using the A2A.NET
-//                          SDK, so other A2A clients can discover and call it.
-//   * CoordinatorAgent   - an in-process Agent Framework agent that delegates to
-//                          the specialist by calling its *A2A endpoint*. The A2A
-//                          card is resolved into an AIAgent with the A2A bridge
-//                          (resolver.GetAIAgentAsync), so the coordinator's tool
-//                          call travels over the A2A wire.
+//   * WeatherPromptAgent  - a *Prompt agent*: a server-side agent created in the
+//                           Foundry project via AgentAdministrationClient. It is
+//                           published behind an A2A endpoint (agent card served at
+//                           /.well-known, JSON-RPC at /weather) using the A2A.NET
+//                           SDK, so other A2A clients can discover and call it.
+//                           Here the Prompt agent acts as an A2A *server*.
+//   * CoordinatorAgent    - an in-process Agent Framework agent that delegates to
+//                           the specialist by calling its *A2A endpoint*. The A2A
+//                           card is resolved into an AIAgent with the A2A bridge
+//                           (resolver.GetAIAgentAsync), so the coordinator's tool
+//                           call travels over the A2A wire (acts as an A2A client).
+//   * HostedConciergeAgent - a *Hosted agent*: one you BUILD in code with the
+//                           Agent Framework (a model deployment plus a LOCAL C#
+//                           tool), as opposed to the declarative Prompt agent. It
+//                           is given the weather-over-A2A tool, so it ITSELF calls
+//                           the Prompt agent over A2A (A2A *client*), and it is
+//                           also published behind its own A2A endpoint (/concierge)
+//                           so the caller invokes it over the wire (A2A *server*).
+//                           One call exercises a two-hop chain:
+//                           caller -> (A2A) -> HostedConciergeAgent -> (A2A) -> WeatherPromptAgent.
 //
-// The single run proves protocol-level A2A: agent-card discovery + a JSON-RPC
-// call between agents. For comparison, the run also shows the *in-process*
-// function-composition path (weatherAgent.AsAIFunction()) and labels it clearly
-// as NOT A2A - it only mimics the call-and-return semantics locally.
+// The single run proves protocol-level A2A: agent-card discovery + JSON-RPC calls
+// between agents, with the Hosted agent acting as both an A2A client and an A2A
+// server. For comparison, the run also shows the *in-process* function-composition
+// path (weatherAgent.AsAIFunction()) and labels it clearly as NOT A2A - it only
+// mimics the call-and-return semantics locally.
 // See README.md for the mapping to the announcement and the open standard.
 // =============================================================================
 
@@ -56,6 +68,14 @@ int localPort = int.TryParse(Environment.GetEnvironmentVariable("A2A_LOCAL_PORT"
     : 5247;
 string a2aBaseUrl = $"http://127.0.0.1:{localPort}";
 const string a2aAgentPath = "/weather";
+
+// The Hosted agent is published on a second self-hosted endpoint (override with
+// A2A_HOSTED_PORT), so the two agents are discovered and called independently.
+int hostedPort = int.TryParse(Environment.GetEnvironmentVariable("A2A_HOSTED_PORT"), out int hp)
+    ? hp
+    : localPort + 1;
+string hostedBaseUrl = $"http://127.0.0.1:{hostedPort}";
+const string hostedAgentPath = "/concierge";
 
 // DefaultAzureCredential uses the identity from 'azd auth login' / 'az login'.
 var credential = new DefaultAzureCredential();
@@ -95,6 +115,7 @@ Console.WriteLine($"User question    : {question}");
 Console.WriteLine();
 
 WebApplication? a2aHost = null;
+WebApplication? hostedHost = null;
 try
 {
     // Bind the server-side Prompt agent as an in-process AIAgent so it can power
@@ -106,12 +127,12 @@ try
     //    SDK hosts an agent card (discovery) plus a JSON-RPC endpoint; the
     //    handler runs the Foundry agent for each incoming A2A message.
     // -----------------------------------------------------------------------
-    AgentCard weatherCard = WeatherAgentHandler.BuildAgentCard($"{a2aBaseUrl}{a2aAgentPath}");
+    AgentCard weatherCard = AgentCards.Weather($"{a2aBaseUrl}{a2aAgentPath}");
 
     WebApplicationBuilder webBuilder = WebApplication.CreateBuilder();
     webBuilder.Logging.ClearProviders(); // keep the demo console output clean
     webBuilder.Services.AddSingleton<AIAgent>(weatherAgent);
-    webBuilder.Services.AddA2AAgent<WeatherAgentHandler>(weatherCard);
+    webBuilder.Services.AddA2AAgent<FoundryAgentA2AHandler>(weatherCard);
 
     a2aHost = webBuilder.Build();
     a2aHost.Urls.Add(a2aBaseUrl);
@@ -155,7 +176,65 @@ try
     Console.WriteLine();
 
     // -----------------------------------------------------------------------
-    // 4. Comparison only - NOT A2A. The same call-and-return semantics can be
+    // 4. Hosted agent in BOTH A2A roles. A "Hosted agent" is one you BUILD in
+    //    code with the Agent Framework (here: a model deployment plus a LOCAL C#
+    //    tool, PackingTips), as opposed to the declarative Prompt agent created
+    //    above via AgentAdministrationClient. It is given the weather-over-A2A
+    //    tool, so when it runs it ITSELF calls the Prompt agent over A2A (acting
+    //    as an A2A *client*). It is also published behind its own A2A endpoint,
+    //    so the top-level caller below invokes it over the wire (acting as an
+    //    A2A *server*). One call therefore exercises a two-hop A2A chain:
+    //    caller -> (A2A) -> HostedConciergeAgent -> (A2A) -> WeatherPromptAgent.
+    // -----------------------------------------------------------------------
+    AIAgent hostedConciergeAgent = projectClient.AsAIAgent(
+        deploymentName,
+        instructions: "You are a travel concierge. When asked about a trip, first call the "
+            + $"{weatherAgentName} tool to get the weather, then call the PackingTips tool with "
+            + "that weather, and reply with a short combined recommendation (weather + what to pack).",
+        name: "HostedConciergeAgent",
+        tools: [weatherOverA2A.AsAIFunction(), AIFunctionFactory.Create(LocalTools.PackingTips)]);
+
+    AgentCard conciergeCard = AgentCards.Concierge($"{hostedBaseUrl}{hostedAgentPath}");
+
+    WebApplicationBuilder hostedBuilder = WebApplication.CreateBuilder();
+    hostedBuilder.Logging.ClearProviders();
+    hostedBuilder.Services.AddSingleton<AIAgent>(hostedConciergeAgent);
+    hostedBuilder.Services.AddA2AAgent<FoundryAgentA2AHandler>(conciergeCard);
+
+    hostedHost = hostedBuilder.Build();
+    hostedHost.Urls.Add(hostedBaseUrl);
+    hostedHost.MapA2A(hostedAgentPath);
+    hostedHost.MapWellKnownAgentCard(conciergeCard);
+    await hostedHost.StartAsync();
+
+    Console.WriteLine($"HostedConciergeAgent is published over A2A (protocol v{A2aProtocol.Version}) at {hostedBaseUrl}");
+    Console.WriteLine($"  agent card : {hostedBaseUrl}/.well-known/agent-card.json");
+    Console.WriteLine($"  JSON-RPC   : {hostedBaseUrl}{hostedAgentPath}");
+    Console.WriteLine();
+
+    var hostedResolver = new A2ACardResolver(new Uri(hostedBaseUrl), httpClient);
+    AgentCard discoveredConciergeCard = await hostedResolver.GetAgentCardAsync();
+    Console.WriteLine(
+        $"Discovered A2A agent card: {discoveredConciergeCard.Name} "
+        + $"(protocol v{discoveredConciergeCard.SupportedInterfaces[0].ProtocolVersion}, "
+        + $"skills: {string.Join(", ", discoveredConciergeCard.Skills.Select(s => s.Id))})");
+
+    AIAgent conciergeOverA2A = await hostedResolver.GetAIAgentAsync(httpClient);
+
+    string tripQuestion = $"I'm planning a trip. {question} Also, what should I pack?";
+    Console.WriteLine(
+        "Calling HostedConciergeAgent over A2A; it in turn calls WeatherPromptAgent over A2A "
+        + "(caller -> concierge -> weather, all via HTTP + JSON-RPC)...");
+    AgentSession conciergeSession = await conciergeOverA2A.CreateSessionAsync();
+    AgentResponse conciergeResponse = await conciergeOverA2A.RunAsync(tripQuestion, conciergeSession);
+    Console.WriteLine();
+    Console.WriteLine(
+        "HostedConciergeAgent (via A2A, acting as both A2A server and A2A client): "
+        + conciergeResponse.Text);
+    Console.WriteLine();
+
+    // -----------------------------------------------------------------------
+    // 5. Comparison only - NOT A2A. The same call-and-return semantics can be
     //    achieved in-process by attaching the Foundry agent directly as a
     //    function tool (weatherAgent.AsAIFunction()). No agent card, no A2A
     //    connection, and no endpoint is involved here; the call never leaves
@@ -175,7 +254,13 @@ try
 }
 finally
 {
-    // Stop the self-hosted A2A endpoint.
+    // Stop the self-hosted A2A endpoints.
+    if (hostedHost is not null)
+    {
+        await hostedHost.StopAsync();
+        await hostedHost.DisposeAsync();
+    }
+
     if (a2aHost is not null)
     {
         await a2aHost.StopAsync();
