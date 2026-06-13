@@ -28,6 +28,9 @@ param modelVersion string = '2025-04-14'
 @description('Name of the model deployment used by the application.')
 param modelDeploymentName string = 'gpt-4.1-mini'
 
+@description('Throughput (TPM in thousands) for the model deployment. The default keeps the demo runnable; capacity 1 triggers immediate HTTP 429s.')
+param modelCapacity int = 30
+
 var abbrs = {
   account: 'aif'
   project: 'proj'
@@ -54,6 +57,7 @@ module resources 'resources.bicep' = {
     modelName: modelName
     modelVersion: modelVersion
     modelDeploymentName: modelDeploymentName
+    modelCapacity: modelCapacity
     principalId: principalId
     principalType: principalType
   }

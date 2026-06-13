@@ -138,7 +138,7 @@ model (provider `Microsoft.CognitiveServices`):
 | --- | --- | --- |
 | Foundry account | `Microsoft.CognitiveServices/accounts` (`kind: AIServices`) | `allowProjectManagement: true`, Entra-only auth |
 | Foundry project | `Microsoft.CognitiveServices/accounts/projects` | Agent host |
-| Model deployment | `Microsoft.CognitiveServices/accounts/deployments` | `gpt-4.1-mini` (GlobalStandard) |
+| Model deployment | `Microsoft.CognitiveServices/accounts/deployments` | `gpt-4.1-mini` (GlobalStandard, capacity `modelCapacity`, default 30K TPM) |
 | Role assignment | `Microsoft.Authorization/roleAssignments` | **Azure AI User** for the deploying principal |
 
 The Bicep outputs `AZURE_AI_PROJECT_ENDPOINT` and `AZURE_AI_MODEL_DEPLOYMENT_NAME`

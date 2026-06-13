@@ -19,6 +19,9 @@ param modelVersion string
 @description('Name of the model deployment.')
 param modelDeploymentName string
 
+@description('Throughput (TPM in thousands) for the model deployment. The default keeps the agent-to-agent demo runnable; capacity 1 causes immediate HTTP 429s under the coordinator\'s nested calls.')
+param modelCapacity int = 30
+
 @description('Principal to grant Foundry data-plane access. Empty skips the role assignment.')
 param principalId string = ''
 
@@ -52,7 +55,7 @@ resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-
   name: modelDeploymentName
   sku: {
     name: 'GlobalStandard'
-    capacity: 1
+    capacity: modelCapacity
   }
   properties: {
     model: {
