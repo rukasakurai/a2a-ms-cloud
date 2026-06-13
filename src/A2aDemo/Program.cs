@@ -4,25 +4,27 @@ using Azure.Identity;
 using Microsoft.Agents.AI;
 
 // =============================================================================
-// Microsoft Foundry Agent Service - agent-to-agent (A2A) demo (.NET 10)
+// Microsoft Foundry Agent Service - agent-as-function delegation demo (.NET 10)
 //
-// The A2A public-preview announcement covers two agent shapes that speak the
-// responses protocol: Prompt agents and Hosted agents. This sample makes BOTH
-// concrete and shows A2A call-and-return spanning the two:
+// This sample demonstrates Microsoft Agent Framework agent-as-function
+// delegation with the same call-and-return semantics as the A2A tool, spanning
+// both agent shapes from the announcement:
 //
 //   * WeatherAgent     - a *Prompt agent*: a server-side agent created in the
 //                        Foundry project via AgentAdministrationClient. It is
 //                        persisted in the project (a name plus versions) and
 //                        answers weather questions.
-//   * CoordinatorAgent - a *Hosted agent*: composed in-process with the
-//                        Microsoft Agent Framework. The Prompt agent is attached
-//                        to it as a tool, so the coordinator delegates to it and
-//                        summarizes the reply.
+//   * CoordinatorAgent - a *Responses Agent*: composed in-process with the
+//                        Microsoft Agent Framework (no server-side resource is
+//                        created). The Prompt agent is attached to it as a tool
+//                        via AsAIFunction(), so the coordinator delegates to it
+//                        and summarizes the reply.
 //
-// When the Hosted coordinator calls the Prompt specialist, the specialist's
+// When the in-process coordinator calls the Prompt specialist, the specialist's
 // answer flows back to the coordinator, which keeps control of the conversation.
-// That call-and-return behavior is exactly what the A2A tool models in Foundry
-// Agent Service. See README.md for the mapping to the announcement.
+// This call-and-return behavior mirrors the A2A tool in Foundry Agent Service
+// but uses in-process function-tool composition, not protocol-level A2A.
+// See README.md for the distinction and the remote A2A path.
 // =============================================================================
 
 string endpoint = Environment.GetEnvironmentVariable("AZURE_AI_PROJECT_ENDPOINT")
@@ -82,9 +84,11 @@ try
     AIAgent weatherAgent = projectClient.AsAIAgent(weatherVersion);
 
     // -----------------------------------------------------------------------
-    // 2. Hosted agent (in-process): compose the CoordinatorAgent with the
-    //    Microsoft Agent Framework. The Prompt agent is attached as a tool via
-    //    AsAIFunction(), so the coordinator can call it (agent-to-agent).
+    // 2. Responses Agent (in-process): compose the CoordinatorAgent with the
+    //    Microsoft Agent Framework. No server-side resource is created; model,
+    //    instructions, and tools are provided at runtime. The Prompt agent is
+    //    attached as a tool via AsAIFunction(), so the coordinator can call it
+    //    (agent-as-function delegation).
     // -----------------------------------------------------------------------
     AIAgent coordinatorAgent = projectClient.AsAIAgent(
         deploymentName,
@@ -92,7 +96,7 @@ try
         name: "CoordinatorAgent",
         tools: [weatherAgent.AsAIFunction()]);
 
-    Console.WriteLine("CoordinatorAgent (Hosted) is delegating to WeatherPromptAgent (Prompt) via A2A...");
+    Console.WriteLine("CoordinatorAgent (Responses Agent) is delegating to WeatherPromptAgent (Prompt) via agent-as-function composition...");
     Console.WriteLine();
 
     AgentSession session = await coordinatorAgent.CreateSessionAsync();

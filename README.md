@@ -1,8 +1,10 @@
 # a2a-ms-cloud
 
 A small, deployable implementation that makes the Microsoft Foundry Agent
-Service **agent-to-agent (A2A)** public-preview announcement concrete, so the
-feature can be understood by running it rather than only reading about it.
+Service **agent-to-agent (A2A)** public-preview announcement concrete by
+demonstrating **in-process agent-as-function delegation** with the same
+call-and-return semantics as the A2A tool, so the pattern can be understood
+by running it rather than only reading about it.
 
 > Microsoft Foundry Agent Service adds agent-to-agent (A2A) communication in
 > public preview for Prompt agents and Hosted agents that use the responses
@@ -37,26 +39,28 @@ entirely to the other agent.)
 
 ## What this repo implements
 
-A **.NET 10** console app (`src/A2aDemo`) that demonstrates the A2A
-call-and-return pattern across **both** agent shapes from the announcement —
-a Prompt agent and a Hosted agent — using the responses protocol:
+A **.NET 10** console app (`src/A2aDemo`) that demonstrates **Microsoft Agent
+Framework agent-as-function delegation** with the same call-and-return semantics
+as the A2A tool — across both agent shapes from the announcement:
 
 - `WeatherPromptAgent` — a **Prompt agent**: a server-side, project-hosted
   (declarative) agent created and versioned through the
   `AgentAdministrationClient` (`DeclarativeAgentDefinition`). It is persisted in
   the Foundry project until deleted and answers weather questions.
-- `CoordinatorAgent` — a **Hosted agent**: composed in-process with the
-  [Microsoft Agent Framework](https://github.com/microsoft/agent-framework). The
-  Prompt agent is attached to it as a tool via `weatherAgent.AsAIFunction()`, so
-  the coordinator can call the specialist agent and summarize the reply —
-  exactly the call-and-return shape the A2A tool models in Foundry Agent Service.
+- `CoordinatorAgent` — a **Responses Agent**: composed in-process with the
+  [Microsoft Agent Framework](https://github.com/microsoft/agent-framework). No
+  server-side resource is created; model, instructions, and tools are provided at
+  runtime. The Prompt agent is attached as a tool via `weatherAgent.AsAIFunction()`,
+  so the coordinator can call the specialist agent and summarize the reply —
+  the same call-and-return shape the A2A tool models in Foundry Agent Service.
 
-The single run exercises **agent-to-agent across the two shapes**: the in-process
-Hosted coordinator delegates to the server-side Prompt specialist and stays in
-control of the user dialogue. This demonstrates the same call-and-return
-semantics as the remote A2A tool without requiring a separate deployed endpoint
-and a portal-created A2A connection (the remote path is summarized under
-[Calling a remote A2A endpoint](#calling-a-remote-a2a-endpoint) below). The app
+The single run exercises **agent-as-function delegation across the two shapes**:
+the in-process Responses Agent coordinator delegates to the server-side Prompt
+specialist and stays in control of the user dialogue. This demonstrates the same
+call-and-return semantics as the remote A2A tool using **in-process function-tool
+composition** — it does not implement protocol-level A2A (no A2A connection,
+A2A tool, or A2A endpoint is used). The remote A2A path is summarized under
+[Calling a remote A2A endpoint](#calling-a-remote-a2a-endpoint) below. The app
 deletes the Prompt agent it creates on exit so repeated runs stay clean.
 
 The Microsoft Foundry resources are provisioned with **Bicep** and **Azure
@@ -72,7 +76,7 @@ Developer CLI (azd)**.
 │   ├── resources.bicep         # Foundry account, project, model deployment, RBAC
 │   └── main.parameters.json    # azd -> Bicep parameter mapping
 └── src/
-    └── A2aDemo/                # .NET 10 console app demonstrating A2A
+    └── A2aDemo/                # .NET 10 console app demonstrating agent-as-function delegation
         ├── A2aDemo.csproj
         └── Program.cs
 ```
@@ -123,7 +127,7 @@ Expected output (text varies with the model):
 ```
 Prompt agent     : WeatherPromptAgent (version 1)
 ...
-CoordinatorAgent (Hosted) is delegating to WeatherPromptAgent (Prompt) via A2A...
+CoordinatorAgent (Responses Agent) is delegating to WeatherPromptAgent (Prompt) via agent-as-function composition...
 
 CoordinatorAgent: It's currently cloudy in Amsterdam with a high near 15°C.
 ```
