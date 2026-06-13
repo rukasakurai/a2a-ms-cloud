@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: a2a-ms-cloud
+metadata:
+  template: a2a-ms-cloud@0.0.1
+
+# This template provisions the Microsoft Foundry resources required by the
+# agent-to-agent (A2A) demo. The .NET 10 console app in src/A2aDemo runs
+# locally against the provisioned Foundry project, so it is not deployed as a
+# hosted service. Run it with the values produced by 'azd env get-values'.
+infra:
+  provider: bicep
+  path: infra
+  module: main

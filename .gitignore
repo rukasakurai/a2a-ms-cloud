@@ -1,0 +1,9 @@
+# Azure Developer CLI
+.azure/
+
+# .NET build output
+bin/
+obj/
+
+# User-specific files
+*.user
